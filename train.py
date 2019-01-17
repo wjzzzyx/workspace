@@ -57,20 +57,20 @@ def train_model(model, dataloader, loss_func, criterion, optimizer, num_epochs):
 		# validation
 		if epoch % args.val_inteval == 0:
 			model.eval()
-			running_score = 0.0
+			channels = np.array([1, 2])
+			score = np.zeros(len(channels))
 			for image, label in dataloader['val']:
 				image = image.to(device)
 				with torch.set_grad_enabled(False):
 					pred = model(image)
 					pred = F.softmax(pred, dim=1)
-				pred = pred.cpu().numpy()
-				pred = np.sum(pred[0, 1:], axis=0)
-				label = np.squeeze(label.numpy())
-				score = criterion(label, pred, th=0.5)
-				running_score += score
-			epoch_score = running_score / len(dataloader['val'].dataset)
+				pred = pred[0].cpu().numpy()
+				label = label[0].numpy()
+				score += criterion(label, pred, channels, th=0.5)
+			epoch_score = score / len(dataloader['val'].dataset)
 			val_history.append(epoch_score)
-			print('Epoch validation f1 score: {:.4f}'.format(epoch_score))
+			for ic, c in enumerate(channels):
+				print('Epoch validation f1 score for channel {}: {:.4f}'.format(c, epoch_score[ic]))
 		
 		if epoch % args.save_inteval == 0:
 			save_path = os.path.join(args.model_path, 'snapshots', 'Unet_e{}.pt'.format(epoch))
@@ -127,10 +127,10 @@ if __name__ == '__main__':
 	from losses import cross_entropy_with_soft_dice_2
 	# loss_func = torch.nn.CrossEntropyLoss()
 
-	from criteria import dice
+	from criteria import dice, multichannel_dice
 
 	try:
-		model, val_history = train_model(model, dataloaders, cross_entropy_with_soft_dice_2, dice, optimizer, args.epochs)
+		model, val_history = train_model(model, dataloaders, cross_entropy_with_soft_dice_2, multichannel_dice, optimizer, args.epochs)
 	except KeyboardInterrupt:
 		sys.exit(0)
 	

@@ -1,7 +1,7 @@
 import os
 import sys
 import argparse
-from PIL import Image
+from skimage import io
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -25,38 +25,41 @@ def test_model(model, dataloader, criterion):
 	print('Begin testing...')
 
 	score = 0.0
-	precision = 0.0
-	recall = 0.0
-	f1 = 0.0
+	channels = np.array([1, 2])
+	ths = np.linspace(0, 1, 20, endpoint=False)
+	precision = np.zeros((len(channels), len(ths)))
+	recall = np.zeros((len(channels), len(ths)))
+	f1 = np.zeros((len(channels), len(ths)))
+	
 	for icase, (image, label) in enumerate(dataloader):
 		image = image.to(device)
 		with torch.no_grad():
 			pred = model(image)
-			pred = F.softmax(pred, dim=1).squeeze_()
-		pos_map = pred[1].cpu().numpy()
-		label = label.squeeze_().numpy()
-		running_score = criterion(label, pos_map, 0.5)
-		score += running_score
-		# res = criterion(label, pos_map, 0.5)
-		# running_p = res['precision']
-		# running_r = res['recall']
-		# running_f = res['f1_score']
-		# precision += running_p
-		# recall += running_r
-		# f1 += running_f
-		pos_map[pos_map >= 0.5] = 1
-		pos_map[pos_map < 0.5] = 0
-		pos_map = (pos_map * 255).astype(np.uint8)
-		pos_map = Image.fromarray(pos_map)
-		pos_map.save(os.path.join(args.result_path, str(icase) + '.png'))
+			pred = F.softmax(pred, dim=1)
+		pred = pred[0].cpu().numpy()
+		label = label[0].numpy()
+		# running_score = criterion(label, pred)
+		# score += running_score
+		res = criterion(label, pred, channels, ths)
+		precision += res['precision']
+		recall += res['recall']
+		f1 += res['f1']
+
+		# pred[pred >= 0.5] = 1
+		# pred[pred < 0.5] = 0
+		# pred = (pred * 255).astype(np.uint8)
+		# io.imsave(os.path.join(args.result_path, str(icase) + '.png'), pred)
 		# print('Testing image {}, dice {:.4f}.'.format(icase, running_score))
-		# print('Testing image {}, precision {:.4f}, recall {:.4f}, f1 {:.4f}.'.format(icase, running_p, running_r, running_f))
-	score /= len(dataloader.dataset)
-	print('Average dice {:.4f}.'.format(score))
-	# precision /= len(dataloader.dataset)
-	# recall /= len(dataloader.dataset)
-	# f1 /= len(dataloader.dataset)
-	# print('Average precision {:.4f}, recall {:.4f}, f1 {:.4f}.'.format(precision, recall, f1))
+	
+	# score /= len(dataloader.dataset)
+	# print('Average dice {:.4f}.'.format(score))
+	precision /= len(dataloader.dataset)
+	recall /= len(dataloader.dataset)
+	f1 /= len(dataloader.dataset)
+	for ic in range(len(channels)):
+		ith = np.argmax(f1[ic])
+		print('Channel {} has maximum average precision {:.4f}, recall {:.4f}, f1 {:.4f} at threshold {}.'.format(channels[ic], precision[ic, ith], recall[ic, ith], f1[ic, ith], ths[ith]))
+	
 	print('Testing completed.')
 
 
@@ -76,9 +79,9 @@ if __name__ == '__main__':
 	model = Unet(args.in_channels, args.out_channels)
 	model.load_state_dict(torch.load(args.model_file))
 
-	from criteria import prf, dice
+	from criteria import prf, dice, multichannel_prcurve
 
 	try:
-		test_model(model, dataloader, dice)
+		test_model(model, dataloader, multichannel_prcurve)
 	except KeyboardInterrupt:
 		sys.exit(0)

@@ -52,13 +52,19 @@ class HistoDataset(Dataset):
 			# label[label > 0] = 1
 			return torch.tensor(image, dtype=torch.float32), torch.tensor(label, dtype=torch.int64)
 		elif self.phase == 'val' or self.phase == 'test':
-			image_fname, label_fname = self.samplelist[idx].split(' ')
+			# image_fname, label_fname = self.samplelist[idx].split(' ')
+			image_fname, membrane_fname, cytoplasm_fname = self.samplelist[idx].split(' ')
 			image = io.imread(image_fname)[:, :, :3]
-			label = io.imread(label_fname)
+			# label = io.imread(label_fname)
+			membrane = io.imread(membrane_fname)
+			cytoplasm = io.imread(cytoplasm_fname)
+			membrane[membrane > 0] = 1
+			cytoplasm[cytoplasm > 0] = 1
+			label = membrane + cytoplasm * 2
 			image, label = self.test_aug(image, label)
 			image = np.transpose(image, (2, 0, 1))
 			image = image[np.newaxis, 0]    # To grayscale
-			label[label > 0] = 1
+			# label[label > 0] = 1
 			return torch.tensor(image, dtype=torch.float32), torch.tensor(label, dtype=torch.int64)
 
 	def transform(self, image, label):
