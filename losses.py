@@ -29,9 +29,8 @@ def cross_entropy_with_soft_dice_2(preds, labels):
 
 
 class GANLoss(nn.Module):
-    'expects pred and label to be of one example'
-    
-    def __init__(self, device, use_lsgan=True, target_real_label=1.0, target_fake_label=0.0):
+
+    def __init__(self, use_lsgan=True, target_real_label=1.0, target_fake_label=0.0):
         super().__init__()
         self.register_buffer('real_label', torch.tensor(target_real_label))
         self.register_buffer('fake_label', torch.tensor(target_fake_label))
@@ -39,7 +38,6 @@ class GANLoss(nn.Module):
             self.loss = nn.MSELoss()
         else:
             self.loss = nn.BCELoss()
-        self.device = device
 
     def __call__(self, pred, target_is_real):
         if target_is_real:
@@ -47,5 +45,5 @@ class GANLoss(nn.Module):
         else:
             label = self.fake_label
         label = label.expand_as(pred)
-        label = label.to(self.device)
+        label = label.to(pred.device)
         return self.loss(pred, label)

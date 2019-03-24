@@ -29,9 +29,7 @@ class Pix2PixModel():
         else:
             self.netG = resnet152_fpn(self.netG_in_channels, self.netG_out_channels, pretrained=False)
             print('Loading model from {}.'.format(kwargs['model_file']))
-            # self.netG = nn.DataParallel(self.netG)
             self.netG.load_state_dict(torch.load(kwargs['model_file']))
-            # self.netG = self.netG.module
             self.netG.to(self.device)
             self.netG.eval()
 
@@ -41,6 +39,7 @@ class Pix2PixModel():
             self.GANloss = GANLoss(self.device, use_lsgan=kwargs['use_lsgan'])
             self.L1loss = nn.L1Loss()
             self.lambda_L1 = kwargs['lambda_L1']
+            self.CEloss = nn.CrossEntropyLoss()
 
             self.optimizer_G = torch.optim.Adam(self.netG.parameters(), lr=kwargs['lr'], betas=(0.5, 0.999))
             self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=kwargs['lr'], betas=(0.5, 0.999))
@@ -53,10 +52,12 @@ class Pix2PixModel():
     def set_input(self, input):
         self.real_A = input['A'].to(self.device)
         self.real_B = input['B'].to(self.device)
+        self.real_B_flat = torch.argmax(self.real_B, dim=1).type(torch.int64)
     
     def optimize(self):
-        self.fake_B_logits = self.netG(self.real_A)
-        self.fake_B = F.tanh(self.fake_B_logits)
+        fake_B_logits = self.netG(self.real_A)
+        # self.fake_B = F.tanh(fake_B_logits)
+        self.fake_B = F.softmax(fake_B_logits, dim=1)
 
         # bp on netD
         self.set_autograd(self.netD, True)
@@ -67,7 +68,7 @@ class Pix2PixModel():
         real_AB = torch.cat([self.real_A, self.real_B], 1)
         pred_real = self.netD(real_AB)
         self.loss_D_real = self.GANloss(pred_real, target_is_real=True)
-        self.loss_D = (self.loss_D_fake + self.loss_D_real) * 0.5
+        self.loss_D = (self.loss_D_fake + self.loss_D_real)
         self.loss_D.backward()
         self.optimizer_D.step()
 
@@ -77,8 +78,9 @@ class Pix2PixModel():
         fake_AB = torch.cat([self.real_A, self.fake_B], 1)
         pred_fake = self.netD(fake_AB)
         self.loss_G_GAN = self.GANloss(pred_fake, target_is_real=True)
-        self.loss_G_L1 = self.L1loss(self.fake_B, self.real_B) * self.lambda_L1
-        self.loss_G = self.loss_G_GAN + self.loss_G_L1
+        self.loss_G_L1 = self.L1loss(self.fake_B[:, 1, :, :], self.real_B[:, 1, :, :]) * self.lambda_L1
+        self.loss_G_CE = self.CEloss(fake_B_logits, self.real_B_flat)
+        self.loss_G = self.loss_G_GAN + self.loss_G_L1 + self.loss_G_CE
         self.loss_G.backward()
         self.optimizer_G.step()
 
@@ -95,7 +97,7 @@ class Pix2PixModel():
 
     def predict(self):
         logits = self.netG(self.real_A)
-        self.fake_B = F.tanh(logits)
+        self.fake_B = F.softmax(logits, dim=1)
         return self.fake_B
 
     def save(self, save_path, suffix):
@@ -117,9 +119,21 @@ class Pix2PixModel():
             array = np.squeeze(array)
             if array.ndim == 3:
                 array = np.transpose(array, (1, 2, 0))
-            img = ((array + 1) / 2 * 255).astype(np.uint8)
+            img = (array * 255).astype(np.uint8)
             return img
-        return {'real_A': to_image(self.real_A[0]), 'real_B': to_image(self.real_B[0]), 'fake_B': to_image(self.fake_B[0])}
+        return {
+            'real_A_nuclei': to_image(self.real_A[0][[0,3,4]]),
+            'real_A_membrane': to_image(self.real_A[0][[1,2,5]]),
+            'real_B_1': to_image(self.real_B[0][1]),
+            'real_B_nucei': to_image(self.real_B[0][2:5]),
+            'fake_B_1': to_image(self.fake_B[0][1]),
+            'fake_B_nuclei': to_image(self.fake_B[0][2:5])
+        }
     
     def get_current_losses(self):
-        return {'G_GAN': self.loss_G_GAN.item(), 'G_L1': self.loss_G_L1.item(), 'D_real': self.loss_D_real.item(), 'D_fake': self.loss_D_fake.item()}
+        return {
+            'loss_G_GAN': self.loss_G_GAN.item(),
+            'loss_G_CE': self.loss_G_CE.item(),
+            'loss_G_L1': self.loss_G_L1.item(), 
+            'loss_D_real': self.loss_D_real.item(), 
+            'loss_D_fake': self.loss_D_fake.item()}

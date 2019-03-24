@@ -40,32 +40,40 @@ class HistoDataset(Dataset):
     
     def __getitem__(self, idx):
         image_fname, label_fname = self.datalist[idx].split(' ')
-        image = cv2.imread(image_fname, cv2.IMREAD_UNCHANGED)
-        label = cv2.imread(label_fname, cv2.IMREAD_UNCHANGED)
-        # image_fname, membrane_fname, cytoplasm_fname = self.samplelist[idx].split(' ')
-        # image = io.imread(image_fname)[:, :, :3]
-        # label = io.imread(label_fname)
-        # membrane = io.imread(membrane_fname)
-        # cytoplasm = io.imread(cytoplasm_fname)
-        # membrane[membrane > 0] = 1
-        # cytoplasm[cytoplasm > 0] = 1
-        # label = membrane + cytoplasm * 2
+        if image_fname[-3:] in ['png']:
+            image = cv2.imread(image_fname, cv2.IMREAD_UNCHANGED)
+        elif image_fname[-3:] == 'npy':
+            image = np.load(image_fname)
+        else:
+            print('Unsupported data format')
+            raise NotImplementedError
+        if label_fname[-3:] in ['png']:
+            label = cv2.imread(label_fname, cv2.IMREAD_UNCHANGED)
+        elif label_fname[-3:] == 'npy':
+            label = np.load(label_fname)
+        else:
+            print('Unsupported data format')
+            raise NotImplementedError
         if image.ndim == 2:
             image = np.expand_dims(image, 2)
-        label = np.expand_dims(label, 2)
+        if label.ndim == 2:
+            label = np.expand_dims(label, 2)
         if self.use_data_aug:
             if self.phase == 'train':
                 image, label = self.train_aug(image, label)
             else:
                 image, label = self.test_aug(image, label)
-        # image = np.transpose(image, (2, 0, 1))
-        # image = image[np.newaxis, 0]
-        image = transforms.ToTensor()(image)
-        label = transforms.ToTensor()(label)
+        # image = transforms.ToTensor()(image)
+        # label = transforms.ToTensor()(label)
+        image = np.transpose(image, (2, 0, 1))
+        image = image.astype(np.float32) / 255.0
+        image = torch.tensor(image, dtype=torch.float32)
+        label = np.transpose(label, (2, 0, 1))
+        label = torch.tensor(label, dtype=torch.float32)
         if self.use_normalization:
             # image = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image)
             image = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])(image)
-        label = (label - 0.5) * 2
+        # label = (label - 0.5) * 2
         return image, label
     
     def transform(self, image, label):
@@ -116,3 +124,30 @@ class HistoDataset(Dataset):
         aug = ToGray(p=1)
         augmented = aug(image=image)
         return augmented['image'], label
+
+
+class SegThenClsDataset(Dataset):
+    'SegmentThenClassify Dataset'
+    def __init__(self, datalist_fname, phase, use_augmentation=False, use_normalization=False):
+        with open(datalist_fname) as f:
+            self.datalist = f.read().splitlines()
+        self.phase = phase
+        self.use_data_aug = use_augmentation
+        self.use_normalization = use_normalization
+
+    def __len__(self):
+        return len(self.datalist)
+
+    def __getitem__(self, idx):
+        DAPI_image_fname, other_image_fname, seg_label_fname, cls_label_fname = self.datalist[idx].split(' ')
+        DAPI_img = np.load(DAPI_image_fname)
+        DAPI_img = np.expand_dims(DAPI_img, 0)
+        other_img = np.load(other_image_fname)
+        seg_label = np.load(seg_label_fname)
+        cls_label = np.load(cls_label_fname)
+        DAPI_img = torch.tensor(DAPI_img, dtype=torch.float32)
+        other_img = torch.tensor(other_img, dtype=torch.float32)
+        seg_label = torch.tensor(seg_label, dtype=torch.float32)
+        cls_label = torch.tensor(cls_label, dtype=torch.int64)
+        return DAPI_img, seg_label, other_img, cls_label
+
